@@ -1,5 +1,6 @@
 (ns event-data-evidence-service.core
-  (:require [clojure.data.json :as json])
+  (:require [clojure.data.json :as json]
+            [clojure.tools.logging :as log])
   (:require [config.core :refer [env]]
             [korma.core :as k]
             [korma.db :as kdb]
@@ -8,8 +9,10 @@
             [compojure.core :as c]
             [compojure.route :as r]
             [org.httpkit.server :as server]
+            [org.httpkit.client :as client]
             [ring.middleware.params :refer [wrap-params]]
-            [clj-time.coerce :as coerce])
+            [clj-time.coerce :as coerce]
+            [overtone.at-at :as at-at])
   (:gen-class))
 
 (kdb/defdb db (kdb/mysql {:db (:db-name env)
@@ -78,11 +81,10 @@
   [artifact-id]
   :available-media-types ["application/javascript"]
   :exists? (fn [ctx]
-             (when-let [a (-> (k/select artifact-names (k/where {:name artifact-id}) (k/with current-artifacts)) first :historical_artifact)]
-               {::artifact a}))
+             (when-let [a (-> (k/select artifact-names (k/where {:name artifact-id}) (k/with current-artifacts)) first)]
+               {::artifact-name a}))
   :handle-ok (fn [ctx] 
-               (prn ctx)
-               (let [current-link (str (:service-base env) "/artifacts/" (-> ctx ::artifact :name) "/versions/" (-> ctx ::artifact :current_artifact first :version-id))]
+               (let [current-link (str (:service-base env) "/artifacts/" (-> ctx ::artifact-name :name) "/versions/" (-> ctx ::artifact-name :current_artifact first :version-id))]
                  (representation/ring-response
                    {:status 303
                     :headers {"Location" current-link}
@@ -120,10 +122,28 @@
   (c/GET "/artifacts/:artifact-id/versions" [artifact-id] (artifact-versions artifact-id))
   (c/GET "/artifacts/:artifact-id/versions/:version-id" [artifact-id version-id] (artifact-version artifact-id version-id)))
 
+; Background
+
+(def schedule-pool (at-at/mk-pool))
+
+(defn start-heartbeat []
+  (at-at/every 60000 (fn []
+                       
+                       (try 
+                       (let [result @(client/post (str (:status-service-base env) "/status/evidence-service/server/heartbeat")
+                                                 {:headers {"Content-type" "text/plain" "Authorization" (str "Token " (:status-service-auth-token env))}
+                                                  :body "1"})]
+                         (when-not (= (:status result) 201)
+                           (log/error "Can't send heartbeat, status" (:status result))))
+                       (catch Exception e (log/error "Can't send heartbeat, exception:" e))))
+               schedule-pool))
+
 (def app
   (-> routes
       (wrap-params)))
 
 (defn -main
-  [& args]  
+  [& args]
+  (start-heartbeat)
+   
   (server/run-server app {:port (Integer/parseInt (:port env))}))

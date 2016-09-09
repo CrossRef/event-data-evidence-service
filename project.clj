@@ -16,7 +16,8 @@
                  [compojure "1.5.1"]                 
                  [liberator "0.14.1"]
                  [yogthos/config "0.8"]
-                 [javax/javaee-api "7.0"]]
+                 [javax/javaee-api "7.0"]
+                 [overtone/at-at "1.2.0"]]
   :main ^:skip-aot event-data-evidence-service.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}
