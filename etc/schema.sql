@@ -15,6 +15,7 @@ CREATE TABLE current_artifact (
 ) ENGINE=InnoDB;
 
 CREATE INDEX current_artifact_name_id ON current_artifact(artifact_name_id);
+CREATE UNIQUE INDEX current_artifact_unique ON current_artifact(artifact_name_id);
 
 CREATE TABLE historical_artifact (
   id INTEGER PRIMARY KEY NOT NULL AUTO_INCREMENT,
@@ -26,6 +27,7 @@ CREATE TABLE historical_artifact (
 ) ENGINE=InnoDB;
 
 CREATE INDEX historical_artifact_name_id ON historical_artifact(artifact_name_id);
+
 
 CREATE TABLE evidence (
   id INTEGER PRIMARY KEY NOT NULL AUTO_INCREMENT,
