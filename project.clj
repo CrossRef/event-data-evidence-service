@@ -17,7 +17,8 @@
                  [liberator "0.14.1"]
                  [yogthos/config "0.8"]
                  [javax/javaee-api "7.0"]
-                 [overtone/at-at "1.2.0"]]
+                 [overtone/at-at "1.2.0"]
+                 [com.amazonaws/aws-java-sdk "1.11.6"]]
   :main ^:skip-aot event-data-evidence-service.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}

@@ -9,7 +9,7 @@ CREATE TABLE current_artifact (
   id INTEGER PRIMARY KEY NOT NULL AUTO_INCREMENT,
   artifact_name_id INTEGER NOT NULL,
   FOREIGN KEY (artifact_name_id) REFERENCES artifact_name(id),
-  version_id VARCHAR(32), # MD5 hash of content
+  version_id VARCHAR(32), -- MD5 hash of content
   updated DATETIME,
   link TEXT
 ) ENGINE=InnoDB;
@@ -21,7 +21,7 @@ CREATE TABLE historical_artifact (
   id INTEGER PRIMARY KEY NOT NULL AUTO_INCREMENT,
   artifact_name_id INTEGER NOT NULL,
   FOREIGN KEY (artifact_name_id) REFERENCES artifact_name(id),
-  version_id VARCHAR(32), # MD5 hash of content
+  version_id VARCHAR(32), -- MD5 hash of content
   updated DATETIME,
   link TEXT
 ) ENGINE=InnoDB;
@@ -31,18 +31,17 @@ CREATE INDEX historical_artifact_name_id ON historical_artifact(artifact_name_id
 
 CREATE TABLE evidence (
   id INTEGER PRIMARY KEY NOT NULL AUTO_INCREMENT,
-  version_id VARCHAR(32), # MD5 hash of content
+  evidence_id VARCHAR(32), -- MD5 hash of content
   data TEXT,
-  processed BOOLEAN
+  processed_events BOOLEAN DEFAULT FALSE,
+  processed_deposits BOOLEAN DEFAULT FALSE
 ) ENGINE=InnoDB;
 
-CREATE INDEX evidence_version_id ON evidence(version_id);
+CREATE INDEX evidence_evidence_id ON evidence(evidence_id);
 
 CREATE TABLE event (
   id INTEGER PRIMARY KEY NOT NULL AUTO_INCREMENT,
-  event_id VARCHAR(32), # UUID
-  data TEXT,
-  processed BOOLEAN
+  event_id VARCHAR(64) -- 36-char UUID
 ) ENGINE=InnoDB;
 
 CREATE INDEX evidence_id ON event(event_id);
