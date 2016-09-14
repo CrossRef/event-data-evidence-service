@@ -310,6 +310,7 @@
 (defn try-lagotto-upload
   "Upload to Lagotto, return success."
   [deposit]
+  (send-heartbeat "evidence-service/deposits/send-deposit" 1)
   (let [payload (json/write-str deposit)]
     (let [endpoint (str (:lagotto-service-base env) "/api/deposits")
           result (try-try-again {:sleep 10000 :tries 10}
@@ -321,8 +322,8 @@
         (log/error "Failed upload " (str result)))
       
       (if ok?
-        (send-heartbeat "evidence-service/upload-deposit/ok" 1)
-        (send-heartbeat "evidence-service/upload-deposit/fail" 1))
+        (send-heartbeat "evidence-service/deposits/send-deposit-ok" 1)
+        (send-heartbeat "evidence-service/deposits/send-deposit-fail" 1))
       ok?)))
 
 (defn start-lagotto-uploads []
@@ -332,14 +333,19 @@
                          (log/info "Tick upload")
                          (let [evidence-items (k/select evidence (k/where {:deposit_status evidence-status-not-uploaded}) (k/fields [:data]))]
                            (doseq [evidence-item evidence-items]
+                             (send-heartbeat "evidence-service/deposits/send-evidence" 1)
                              (let [data (json/read-str (:data evidence-item) :key-fn keyword)
                                    deposits (:deposits data)
                                    deposit-results (map try-lagotto-upload deposits)
                                    all-success (every? true? deposit-results)]
                                (log/info "Upload Evidence Item " (:evidence_id evidence-item) "to Lagotto." (count deposits) "deposits.")
                                (if all-success
-                                 (log/info "Succeeded uploading Deposits.")
-                                 (log/info "Failed to upload Deposits."))
+                                 (do
+                                   (log/info "Succeeded uploading Deposits.")
+                                   (send-heartbeat "evidence-service/deposits/send-evidence-success" 1))
+                                 (do
+                                   (log/info "Failed to upload Deposits.")
+                                   (send-heartbeat "evidence-service/deposits/send-evidence-failure" 1)))
                                (if all-success
                                  (k/update evidence (k/where {:id (:id evidence-item)}) (k/set-fields {:deposit_status evidence-status-uploaded}))
                                  (k/update evidence (k/where {:id (:id evidence-item)}) (k/set-fields {:deposit_status evidence-status-upload-failed}))))))
