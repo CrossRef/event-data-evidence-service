@@ -1,4 +1,4 @@
-(defproject event-data-evidence-service "0.1.1"
+(defproject event-data-evidence-service "0.1.2"
   :description "Event Data Evidence Service"
   :url "http://eventdata.crossref.org"
   :license {:name "Eclipse Public License"

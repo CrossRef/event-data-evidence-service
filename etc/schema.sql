@@ -34,7 +34,7 @@ CREATE TABLE evidence (
   evidence_id VARCHAR(32), -- MD5 hash of content
   data LONGTEXT,
   processed_events BOOLEAN DEFAULT FALSE,
-  deposit_status INTEGER NOT NULL,
+  deposit_status INTEGER NOT NULL
 ) ENGINE=InnoDB;
 
 CREATE INDEX evidence_evidence_id ON evidence(evidence_id);

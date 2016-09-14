@@ -25,6 +25,16 @@
 (def evidence-status-uploaded 2)
 (def evidence-status-upload-failed 3)
 
+(defn send-heartbeat [heartbeat-name heartbeat-count]
+  (try 
+    (try-try-again {:sleep 10000 :tries 10}
+       #(let [result @(client/post (str (:status-service-base env) (str "/status/" heartbeat-name))
+                       {:headers {"Content-type" "text/plain" "Authorization" (str "Token " (:status-service-auth-token env))}
+                        :body (str heartbeat-count)})]
+         (when-not (= (:status result) 201)
+           (log/error "Can't send heartbeat, status" (:status result)))))
+   (catch Exception e (log/error "Can't send heartbeat, exception:" e))))
+
 
 ; Auth
 ; Tokens are comma-separated in the config.
@@ -112,6 +122,7 @@
              (when-let [a (k/select artifact-names)]
                {::artifact a}))
   :handle-ok (fn [ctx]
+              (send-heartbeat "evidence-service/api/get-list-all" 1)
               (let [names (map (fn [{n :name :as artifact-name}]
                                  {:name n
                                   :current (str (:service-base env) "/artifacts/" n "/current")
@@ -124,7 +135,8 @@
   :exists? (fn [ctx]
              (when-let [a (-> (k/select artifact-names (k/where {:name artifact-id}) (k/with current-artifacts)) first)]
                {::artifact-name a}))
-  :handle-ok (fn [ctx] 
+  :handle-ok (fn [ctx]
+               (send-heartbeat "evidence-service/api/get-artifact-current" 1)
                (let [current-link (str (:service-base env) "/artifacts/" (-> ctx ::artifact-name :name) "/versions/" (-> ctx ::artifact-name :current_artifact first :version-id))]
                  (representation/ring-response
                    {:status 303
@@ -135,6 +147,7 @@
   [artifact-id]
   :available-media-types ["application/javascript"]
   :exists? (fn [ctx]
+             (send-heartbeat "evidence-service/api/get-artifact-versions" 1)
              (when-let [as (-> (k/select artifact-names (k/where {:name artifact-id}) (k/with historical-artifacts)) first)]
                {::artifacts (:historical_artifact as) ::name (:name as)}))
   :handle-ok (fn [ctx]
@@ -151,6 +164,7 @@
                    a-version (when a-name (first (k/select historical-artifacts (k/where {:artifact_name_id (:id a-name) :version_id version-id}))))]
                {::artifact-version a-version}))
   :handle-ok (fn [ctx]
+               (send-heartbeat "evidence-service/api/get-artifact-version" 1)
                (let [link (-> ctx ::artifact-version :link)]
                  (representation/ring-response
                      {:status 303
@@ -173,6 +187,7 @@
                  [false {::input-body body ::data data}]))
  :handle-ok "ok"
  :post! (fn [ctx]
+          (send-heartbeat "evidence-service/api/receive-evidence" 1)
           ; We have two 'ids' here, the integer PK id and the event-id (GUID) and evidence-id (content hash).
           (let [content-hash (md5 (::input-body ctx))
                 deposits (:deposits (::data ctx))]
@@ -248,6 +263,7 @@
                 [evidence-id {::evidence-id evidence-id}]))
   
   :handle-ok (fn [ctx]
+               (send-heartbeat "evidence-service/api/get-event-evidence" 1)
                (let [link (str (:archive-base-url env) "/evidence/" (-> ctx ::evidence-id))]
                  (representation/ring-response
                      {:status 303
@@ -266,6 +282,7 @@
                 [evidence-id {::evidence-id evidence-id}]))
   
   :handle-ok (fn [ctx]
+               (send-heartbeat "evidence-service/api/get-evidence" 1)
                (let [link (str (:archive-base-url env) "/evidence/" (-> ctx ::evidence-id))]
                  (representation/ring-response
                      {:status 303
@@ -284,16 +301,6 @@
 ; Background
 
 (def schedule-pool (at-at/mk-pool))
-
-(defn send-heartbeat [heartbeat-name heartbeat-count]
-  (try 
-    (try-try-again {:sleep 10000 :tries 10}
-       #(let [result @(client/post (str (:status-service-base env) (str "/status/" heartbeat-name))
-                       {:headers {"Content-type" "text/plain" "Authorization" (str "Token " (:status-service-auth-token env))}
-                        :body (str heartbeat-count)})]
-         (when-not (= (:status result) 201)
-           (log/error "Can't send heartbeat, status" (:status result)))))
-   (catch Exception e (log/error "Can't send heartbeat, exception:" e))))
 
 (defn start-heartbeat []
   (log/info "Start heartbeat schedule")
