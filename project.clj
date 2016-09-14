@@ -1,4 +1,4 @@
-(defproject event-data-evidence-service "0.1.2"
+(defproject event-data-evidence-service "0.1.3"
   :description "Event Data Evidence Service"
   :url "http://eventdata.crossref.org"
   :license {:name "Eclipse Public License"
@@ -18,7 +18,10 @@
                  [yogthos/config "0.8"]
                  [javax/javaee-api "7.0"]
                  [overtone/at-at "1.2.0"]
-                 [com.amazonaws/aws-java-sdk "1.11.6"]]
+                 [com.amazonaws/aws-java-sdk "1.11.6"]
+                 [org.clojure/tools.logging "0.3.1"]
+                 [org.apache.logging.log4j/log4j-core "2.6.2"]
+                 [org.slf4j/slf4j-simple "1.7.21"]]
   :main ^:skip-aot event-data-evidence-service.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}
