@@ -32,9 +32,9 @@ CREATE INDEX historical_artifact_name_id ON historical_artifact(artifact_name_id
 CREATE TABLE evidence (
   id INTEGER PRIMARY KEY NOT NULL AUTO_INCREMENT,
   evidence_id VARCHAR(32), -- MD5 hash of content
-  data TEXT,
+  data LONGTEXT,
   processed_events BOOLEAN DEFAULT FALSE,
-  processed_deposits BOOLEAN DEFAULT FALSE
+  deposit_status INTEGER NOT NULL,
 ) ENGINE=InnoDB;
 
 CREATE INDEX evidence_evidence_id ON evidence(evidence_id);

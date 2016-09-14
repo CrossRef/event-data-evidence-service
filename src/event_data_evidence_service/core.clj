@@ -12,13 +12,19 @@
             [org.httpkit.client :as client]
             [ring.middleware.params :refer [wrap-params]]
             [clj-time.coerce :as coerce]
-            [overtone.at-at :as at-at])
+            [overtone.at-at :as at-at]
+            [robert.bruce :refer [try-try-again]])
   (:import [java.security MessageDigest])
   (:import [com.amazonaws.services.s3 AmazonS3 AmazonS3Client]
            [com.amazonaws.auth BasicAWSCredentials]
            [com.amazonaws.services.s3.model GetObjectRequest PutObjectRequest ObjectMetadata]
            [com.amazonaws AmazonServiceException AmazonClientException])
   (:gen-class))
+
+(def evidence-status-not-uploaded 1)
+(def evidence-status-uploaded 2)
+(def evidence-status-upload-failed 3)
+
 
 ; Auth
 ; Tokens are comma-separated in the config.
@@ -37,22 +43,23 @@
   []
   (new AmazonS3Client (new BasicAWSCredentials (:s3-access-key-id env) (:s3-secret-access-key env))))
 
-(def aws-client (delay (get-aws-client)))
-
 (defn upload-bytes
   "Upload a stream. Exception on failure."
   [bytes bucket-name remote-name content-type]
-  (let [metadata (new ObjectMetadata)
+  (let [aws-client (get-aws-client)
+        metadata (new ObjectMetadata)
         _ (.setContentType metadata content-type)
         _ (.setContentLength metadata (alength bytes))
         request (new PutObjectRequest bucket-name remote-name (new java.io.ByteArrayInputStream bytes) metadata)]
-        (.putObject @aws-client request)))
+        (.putObject aws-client request)))
 
 ; Database.
 
 (kdb/defdb db (kdb/mysql {:db (:db-name env)
-                           :user (:db-user env)
-                           :password (:db-password env)}))
+                          :host (:db-host env) 
+                          :port (Integer/parseInt (:db-port env))
+                          :user (:db-user env)
+                          :password (:db-password env)}))
 
 (declare current-artifacts)
 (declare historical-artifacts)
@@ -84,7 +91,7 @@
   (k/table "evidence")
   (k/pk :id)
   ; :data field also present, but not incldued as Korma doesn't allow subselection of fields.
-  (k/entity-fields :id :evidence_id :processed_events :processed_deposits))
+  (k/entity-fields :id :evidence_id :processed_events :deposit_status))
 
 (k/defentity events
   (k/table "event")
@@ -186,7 +193,7 @@
               ; Upload ok!
               (do
                 ; Idempotent POST for same data.
-                (k/exec-raw ["INSERT IGNORE INTO evidence (evidence_id, data) VALUES (?,?)" [content-hash (::input-body ctx)]])
+                (k/exec-raw ["INSERT IGNORE INTO evidence (evidence_id, data, deposit_status) VALUES (?,?,?)" [content-hash (::input-body ctx) evidence-status-not-uploaded]])
                             
                 (log/info "Accept Evidence id" content-hash)
                 (if-let [evidence-id (-> (k/select evidence (k/where {:evidence_id content-hash})) first :id)]
@@ -278,16 +285,59 @@
 
 (def schedule-pool (at-at/mk-pool))
 
+(defn send-heartbeat [heartbeat-name heartbeat-count]
+  (try 
+    (try-try-again {:sleep 10000 :tries 10}
+       #(let [result @(client/post (str (:status-service-base env) (str "/status/" heartbeat-name))
+                       {:headers {"Content-type" "text/plain" "Authorization" (str "Token " (:status-service-auth-token env))}
+                        :body (str heartbeat-count)})]
+         (when-not (= (:status result) 201)
+           (log/error "Can't send heartbeat, status" (:status result)))))
+   (catch Exception e (log/error "Can't send heartbeat, exception:" e))))
+
 (defn start-heartbeat []
-  (at-at/every 60000 (fn []
-                       (try 
-                         (let [result @(client/post (str (:status-service-base env) "/status/evidence-service/server/heartbeat")
-                                                   {:headers {"Content-type" "text/plain" "Authorization" (str "Token " (:status-service-auth-token env))}
-                                                    :body "1"})]
-                           (when-not (= (:status result) 201)
-                             (log/error "Can't send heartbeat, status" (:status result))))
-                       (catch Exception e (log/error "Can't send heartbeat, exception:" e))))
+  (log/info "Start heartbeat schedule")
+  (at-at/every 60000 #(send-heartbeat "evidence-service/server/heartbeat" 1)
                schedule-pool))
+
+(defn try-lagotto-upload
+  "Upload to Lagotto, return success."
+  [deposit]
+  (let [payload (json/write-str deposit)]
+    (let [endpoint (str (:lagotto-service-base env) "/api/deposits")
+          result (try-try-again {:sleep 10000 :tries 10}
+                                #(deref (client/post endpoint {:headers {"Authorization" (str "Token token=" (:lagotto-service-auth-token env)) "Content-Type" "application/json"} :body payload})))
+            ok? (= (:status result) 202)]
+      (log/info "Upload status" (:status result) "ok?" ok?)
+      
+      (when-not ok?
+        (log/error "Failed upload " (str result)))
+      
+      (if ok?
+        (send-heartbeat "evidence-service/upload-deposit/ok" 1)
+        (send-heartbeat "evidence-service/upload-deposit/fail" 1))
+      ok?)))
+
+(defn start-lagotto-uploads []
+  (log/info "Start Lagotto upload schedule")
+  (at-at/every 60000 (fn []
+                       (try
+                         (log/info "Tick upload")
+                         (let [evidence-items (k/select evidence (k/where {:deposit_status evidence-status-not-uploaded}) (k/fields [:data]))]
+                           (doseq [evidence-item evidence-items]
+                             (let [data (json/read-str (:data evidence-item) :key-fn keyword)
+                                   deposits (:deposits data)
+                                   deposit-results (map try-lagotto-upload deposits)
+                                   all-success (every? true? deposit-results)]
+                               (log/info "Upload Evidence Item " (:evidence_id evidence-item) "to Lagotto." (count deposits) "deposits.")
+                               (if all-success
+                                 (log/info "Succeeded uploading Deposits.")
+                                 (log/info "Failed to upload Deposits."))
+                               (if all-success
+                                 (k/update evidence (k/where {:id (:id evidence-item)}) (k/set-fields {:deposit_status evidence-status-uploaded}))
+                                 (k/update evidence (k/where {:id (:id evidence-item)}) (k/set-fields {:deposit_status evidence-status-upload-failed}))))))
+                        (catch Exception e (log/error "Error in Lagotto upload " (str e)))))
+               schedule-pool :fixed-delay true))
 
 (def app
   (-> routes
@@ -295,6 +345,12 @@
 
 (defn -main
   [& args]
+  ; Every instance has a heartbeat.
   (start-heartbeat)
-   
+  
+  ; Nominated instances upload to Lagotto. Only one at once.
+  ; Also useful for development.
+  (when (:send-deposits-to-lagotto env)
+    (start-lagotto-uploads))
+  
   (server/run-server app {:port (Integer/parseInt (:port env))}))
