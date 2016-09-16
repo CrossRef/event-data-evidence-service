@@ -236,7 +236,7 @@
                        [true {::evidence-id content-hash}]))
                 
                   ; Not got an evidence record.
-                  (log/error "Couldn't insert Evidence record " content-hash)))))))
+                  (log/error "Couldn't insert Evidence record " content-hash))))))
      
  :post-redirect? true
  :handle-see-other (fn [ctx]
