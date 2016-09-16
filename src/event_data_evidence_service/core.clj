@@ -227,15 +227,16 @@
                                                    (log/error "Failed to create Event id " (:uuid deposit)))) deposits)]
                   
                     ; Might be empty due to no Deposits.
-                    (if-not (every? true? deposit-results)
-                      (log/error "Errors inserting event records " content-hash)
-                      (if-not (= 1 (k/update evidence (k/set-fields {:processed_events true}) (k/where {:id evidence-id})))
-                         (log/error "Failed to update Evidence")
-                          ; Return true if everything worked for the Event and the link.
-                         [true {::evidence-id content-hash}])))
-                  
+                    (when-not (every? true? deposit-results)
+                      (log/error "Errors inserting event records " content-hash))
+                      
+                    (if-not (= 1 (k/update evidence (k/set-fields {:processed_events true}) (k/where {:id evidence-id})))
+                       (log/error "Failed to update Evidence")
+                        ; Return true if everything worked for the Event and the link.
+                       [true {::evidence-id content-hash}]))
+                
                   ; Not got an evidence record.
-                  (log/error "Couldn't insert Evidence record " content-hash))))))
+                  (log/error "Couldn't insert Evidence record " content-hash)))))))
      
  :post-redirect? true
  :handle-see-other (fn [ctx]
